@@ -175,7 +175,7 @@ def read_fastq_record(fastq_file):
   if not qname:
     return 
   if qname[0] != "@":
-    raise "Invalid FASTQ entry"
+    raise Exception("Invalid FASTQ entry")
   if qname[-1] == "1":
     is_read1 = True
   elif qname[-1] == "2":
@@ -184,7 +184,7 @@ def read_fastq_record(fastq_file):
     is_read1 = None
   seq = fastq_file.readline().strip()
   if fastq_file.readline()[0] != "+":
-    raise "Invalid FASTQ entry"
+    raise Exception("Invalid FASTQ entry")
   qual = fastq_file.readline().strip()
   return SimpleRecord(qname, seq, qual, is_read1)
 
@@ -228,7 +228,6 @@ def split_existing_paired_fastq(fastq_1_path, fastq_2_path, fastq_prefix):
     input_fastq_2 = open(fastq_2_path, 'r')
   input_fastq_1.seek(0)
   input_fastq_2.seek(0)
-
   record_writer = RecordWriter(fastq_prefix)
   # TODO: Read files and submit parallel records to RecordWriter
 
