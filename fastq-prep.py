@@ -106,11 +106,12 @@ class SimpleRecord(object):
     seq: Sequence string
     qual: Quality string
   """
-  def __init__(self, qname, seq, qual):
+  def __init__(self, qname, seq, qual, is_read1):
     """Inits object with FASTQ entries"""
     self.qname = qname
     self.seq = seq
     self.qual = qual
+    self.is_read1 = is_read1
 
 def reverse_complement(seq):
   """Returns reverse complement of given sequence using list comprehension"""
@@ -167,38 +168,68 @@ def read_fastq_record(fastq_file):
   Args:
     fastq_file: Open file object
   Returns:
-    record: Object with qual, seq, qname attributes
+    record: Object with qual, seq, qname attributes. 
+      Will return None when EOF reached (or empty line)
   """
   qname = fastq_file.readline().strip()
-  if not qname or qname[0] != "@":
-    return
+  if not qname:
+    return 
+  if qname[0] != "@":
+    raise "Invalid FASTQ entry"
+  if qname[-1] == "1":
+    is_read1 = True
+  elif qname[-1] == "2":
+    is_read1 = False
+  else:
+    is_read1 = None
   seq = fastq_file.readline().strip()
   if fastq_file.readline()[0] != "+":
-    return 
+    raise "Invalid FASTQ entry"
   qual = fastq_file.readline().strip()
-  return SimpleRecord(qname, seq, qual)
+  return SimpleRecord(qname, seq, qual, is_read1)
 
 
-def split_existing_interleaved_fastq():
+def split_existing_interleaved_fastq(fastq_path, fastq_prefix):
+  """Converts a single interleaved FASTQ file to split and paired chunks
+
+  Args:
+    fastq_path: Full path to input interleaved FASTQ file.
+    fastq_prefix: Prefix for output FASTQ chunks
+  """
   try:
     input_fastq = gzip.open(fastq_path, 'r')
     input_fastq.readline()
   except IOError:
     input_fastq = open(fastq_path, 'r')
   input_fastq.seek(0)
+  record_writer = RecordWriter(fastq_prefix)
   # TODO: Read file and submit adjacent records to RecordWriter
+  while True:
+    record_1 = read_fastq_record(input_fastq)
+    record_2 = read_fastq_record(input_fastq)
+    record_writer.write_paired_records(record_1, record_2)
 
-def split_existing_paired_fastq():
+
+def split_existing_paired_fastq(fastq_1_path, fastq_2_path, fastq_prefix):
+  """Converts a pair of FASTQ files to split chunks
+
+  Args:
+    fastq_1_path: Full path to first FASTQ file
+    fastq_2_path: Full path to second FASTQ file
+    fastq_prefix: Prefix for output FASTQ chunks
+  """
   try:
     input_fastq_1 = gzip.open(fastq_1_path, 'r')
-    input_fastq_2 = gzip.open(fastq_1_path, 'r')
+    input_fastq_2 = gzip.open(fastq_2_path, 'r')
     input_fastq_1.readline()
     input_fastq_2.readline()
   except IOError:
     input_fastq_1 = open(fastq_1_path, 'r')
     input_fastq_2 = open(fastq_2_path, 'r')
   input_fastq_1.seek(0)
-  input_fastq_2.seel(0)
+  input_fastq_2.seek(0)
+
+  record_writer = RecordWriter(fastq_prefix)
   # TODO: Read files and submit parallel records to RecordWriter
 
 if __name__ == "__main__":
