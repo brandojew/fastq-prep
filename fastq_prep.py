@@ -4,7 +4,6 @@ import pysam
 import gzip
 import sys
 
-
 #Global constants for development
 RECORDS_PER_FILE = 750000 # ~60MB
 COMPRESS_LEVEL = 5
@@ -42,11 +41,9 @@ class RecordWriter(object):
     if self.fastq_file_1 and self.fastq_file_2:
       self.fastq_file_1.close()
       self.fastq_file_2.close()
-
     self.fastq_index += 1
     self.fastq_records = 0
     index_str = str(self.fastq_index).zfill(5)
-
     fastq_path_1 = \
       '{}_{}_{}.fastq.gz'.format(self.fastq_prefix, index_str, "R1")
     fastq_path_2 = \
@@ -70,7 +67,6 @@ class RecordWriter(object):
     else:
       record_1 = record_b
       record_2 = record_a
-
     if record_1.is_reverse:
       self.fastq_file_1.write("\n".join([record_1.qname+"/1", \
         reverse_complement(record_1.seq), "+", \
@@ -78,7 +74,6 @@ class RecordWriter(object):
     else:
       self.fastq_file_1.write("\n".join([record_1.qname+"/1", \
         record_1.seq, "+", record_1.qual, ""]))
-
     if record_2.is_reverse:
       self.fastq_file_2.write("\n".join([record_2.qname+"/2", \
         reverse_complement(record_2.seq), "+", \
@@ -87,7 +82,6 @@ class RecordWriter(object):
       self.fastq_file_2.write("\n".join([record_2.qname+"/2", \
         record_2.seq, "+", record_2.qual, ""]))
     self.fastq_records += 1
-
     if self.fastq_records == RECORDS_PER_FILE:
       self.update_fastq_index()
 
@@ -114,6 +108,7 @@ class SimpleRecord(object):
     self.seq = seq
     self.qual = qual
     self.is_read1 = is_read1
+    self.is_reverse = False
 
   def copy_constructor(self, record):
     """Inits object using Pysam record object"""
@@ -121,12 +116,12 @@ class SimpleRecord(object):
     self.seq = record.seq
     self.qual = record.qual
     self.is_read1 = record.is_read1
+    self.is_reverse = record.is_reverse
 
   def fastq_format(self):
     """Prints data members in FASTQ format"""
     print("\n".join([self.qname, \
         self.seq, "+", self.qual, ""]))
-
 
 def reverse_complement(seq):
   """Returns reverse complement of given sequence using list comprehension"""
@@ -143,7 +138,6 @@ def bam_to_fastq(bam_path, fastq_prefix):
   record_writer = RecordWriter(fastq_prefix)
   record_count = 0
   record_dict = {}
-
   for record in bam_file.fetch():
     record_count += 1
     if record.is_paired:
@@ -159,7 +153,6 @@ def bam_to_fastq(bam_path, fastq_prefix):
 
   for record in record_dict.values():
     record_writer.write_unpaired_record(record)
-
 
 def read_fastq_record(fastq_file):
   """Reads one record from a FASTQ file
@@ -188,9 +181,7 @@ def read_fastq_record(fastq_file):
   if qname[len(qname)-2:len(qname)] == '/1' \
       or qname[len(qname)-2:len(qname)] == '/2':
     qname = qname[0:len(qname)-2]
-
   return SimpleRecord(qname, seq, qual, is_read1)
-
 
 def split_interleaved_fastq(fastq_path, fastq_prefix):
   """Converts a single interleaved FASTQ file to split and paired chunks
@@ -220,7 +211,6 @@ def split_interleaved_fastq(fastq_path, fastq_prefix):
     if record_1.qname != record_2.qname:
       raise Exception("Input FASTQ not sorted. Paired records not adjacent")
     record_writer.write_paired_records(record_1, record_2)
-
 
 def split_paired_fastq(fastq_1_path, fastq_2_path, fastq_prefix):
   """Converts a pair of FASTQ files to split chunks
@@ -255,7 +245,6 @@ def split_paired_fastq(fastq_1_path, fastq_2_path, fastq_prefix):
       continue
     if record_1.qname != record_2.qname:
       raise Exception("Input FASTQ not sorted. Paired records not adjacent")
-
     record_writer.write_paired_records(record_1, record_2)
 
 if __name__ == "__main__":
@@ -268,7 +257,5 @@ if __name__ == "__main__":
   print(BAM_PATH)
   print('FASTQ files will be split into files with the following structure:')
   print('{}_XXXXX_RX.fastq.gz'.format(FASTQ_PREFIX))
-
   bam_to_fastq(BAM_PATH, FASTQ_PREFIX)
-
   print("Done")
