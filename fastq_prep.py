@@ -35,7 +35,7 @@ class RecordWriter(object):
     self.fastq_file_2 = None
     self.update_fastq_index()
     unpaired_path = ''.join([fastq_prefix, '_unpaired.fastq.gz'])
-    self.unpaired_file = gzip.open(unpaired_path, 'w', compresslevel=COMPRESS_LEVEL)
+    self.unpaired_file = gzip.open(unpaired_path, 'wt', compresslevel=COMPRESS_LEVEL)
 
   def update_fastq_index(self):
     """Closes current chunks for FASTQ files and creates next chunks"""
@@ -49,8 +49,8 @@ class RecordWriter(object):
       '{}_{}_{}.fastq.gz'.format(self.fastq_prefix, index_str, "R1")
     fastq_path_2 = \
       '{}_{}_{}.fastq.gz'.format(self.fastq_prefix, index_str, "R2")
-    self.fastq_file_1 = gzip.open(fastq_path_1, 'w', compresslevel=COMPRESS_LEVEL)
-    self.fastq_file_2 = gzip.open(fastq_path_2, 'w', compresslevel=COMPRESS_LEVEL)
+    self.fastq_file_1 = gzip.open(fastq_path_1, 'wt', compresslevel=COMPRESS_LEVEL)
+    self.fastq_file_2 = gzip.open(fastq_path_2, 'wt', compresslevel=COMPRESS_LEVEL)
 
   def write_paired_records(self, record_a, record_b):
     """Writes given records to appropriate FASTQ chunk
@@ -145,7 +145,7 @@ def bam_to_fastq(bam_path, fastq_prefix):
   record_writer = RecordWriter(fastq_prefix)
   record_count = 0
   record_dict = {}
-  for record in bam_file.fetch():
+  for record in bam_file:
     record_count += 1
     if record.is_paired:
       if record.qname in record_dict:
@@ -283,12 +283,13 @@ def fastq_prep(output_prefix, input_files):
     output_prefix: full path prefix for output FASTQ chunks
     input_files: A list of input files to convert (1 or 2 files only)
   """
+  print("\nConverting following file(s) to split and compressed FASTQ format:")
+  for input_path in input_files:
+    print("".join(["\t", input_path]))
+  print("Output will be split into files with the following path structure:")
+  print('\t{}_XXXXX_RX.fastq.gz'.format(output_prefix))
   if len(input_files) == 1:
     input_path = input_files[0]
-    print("Converting following file to split and compressed FASTQ format:")
-    print("".join(["\t", input_path]))
-    print("FASTQ files will be split into files with the following structure:")
-    print('\t{}_XXXXX_RX.fastq.gz'.format(output_prefix))
     input_extension = os.path.splitext(input_path)[1].lower()
     if input_extension == ".bam" or input_extension == ".sam":
       bam_to_fastq(input_path, output_prefix)
@@ -299,11 +300,6 @@ def fastq_prep(output_prefix, input_files):
   elif len(input_files) == 2:
     input_path_1 = input_files[0]
     input_path_2 = input_files[1]
-    print("Converting following files to split and compressed FASTQ format:")
-    print("".join(["\t", input_path_1]))
-    print("".join(["\t", input_path_2]))
-    print("FASTQ files will be split into files with the following structure:")
-    print('\t{}_XXXXX_RX.fastq.gz'.format(output_prefix))
     split_paired_fastq(input_path_1, input_path_2, output_prefix)
   else:
     raise Exception('Incorrect number of input files given: {}'.\
