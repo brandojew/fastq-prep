@@ -175,6 +175,8 @@ def read_fastq_record(fastq_file):
     return
   if qname[0] != "@":
     raise Exception("Invalid FASTQ entry")
+  else:
+    qname = qname[1::]
   if qname[-1] == "1":
     is_read1 = True
   elif qname[-1] == "2":
@@ -262,35 +264,53 @@ def split_paired_fastq(fastq_1_path, fastq_2_path, fastq_prefix):
     if not record_count % 10000000:
       print('Processed {} records'.format(str(record_count)))
 
-if __name__ == "__main__":
-  if len(sys.argv) < 3 or len(sys.argv) > 4:
-    print("\nUsage: python bam_to_fastq.py [in.bam, in.fq] [out.fq prefix]")
-    print("    OR python fastq_prep.py [in_1.fq] [in_2.fq] [out.fq prefix]")
-    print("\nExample: python fastq_prep.py test_input.bam test_ouput")
-    print("This command will generate test_output_XXXXX_R[1,2].fastq.gz\n")
-    sys.exit()
-  if len(sys.argv) == 3:
-    INPUT_PATH = sys.argv[1]
-    FASTQ_PREFIX = sys.argv[2]
+def help_message():
+  """Prints usage info"""
+  print("\nUsage: python fastq_prep.py [out.fq prefix] [in.bam OR in.fq]")
+  print("    OR python fastq_prep.py [out.fq prefix] [in_1.fq,in_2.fq]")
+  print("\n*Multiple input files are separated by a comma")
+  print("\nExample: python fastq_prep.py test_output test_input.bam")
+  print("This command will generate test_output_XXXXX_R[1,2].fastq.gz\n")
+  sys.exit()
+
+def fastq_prep(output_prefix, input_files):
+  """Main interface for converting files to split and compressed fastq files
+
+  Determines type of input (Single BAM, Single FASTQ, or Paired FASTQ) and
+  passes input files to correct conversion function.
+
+  Args:
+    output_prefix: full path prefix for output FASTQ chunks
+    input_files: A list of input files to convert (1 or 2 files only)
+  """
+  if len(input_files) == 1:
+    input_path = input_files[0]
     print("Converting following file to split and compressed FASTQ format:")
-    print("".join(["\t", INPUT_PATH]))
+    print("".join(["\t", input_path]))
     print("FASTQ files will be split into files with the following structure:")
-    print('\t{}_XXXXX_RX.fastq.gz'.format(FASTQ_PREFIX))
-    INPUT_EXTENSION = os.path.splitext(INPUT_PATH)[1].lower()
-    if INPUT_EXTENSION == ".bam" or INPUT_EXTENSION == ".sam":
-      bam_to_fastq(INPUT_PATH, FASTQ_PREFIX)
-    elif INPUT_EXTENSION == ".fastq" or INPUT_EXTENSION == ".fq":
-      split_interleaved_fastq(INPUT_PATH, FASTQ_PREFIX)
+    print('\t{}_XXXXX_RX.fastq.gz'.format(output_prefix))
+    input_extension = os.path.splitext(input_path)[1].lower()
+    if input_extension == ".bam" or input_extension == ".sam":
+      bam_to_fastq(input_path, output_prefix)
+    elif input_extension == ".fastq" or input_extension == ".fq":
+      split_interleaved_fastq(input_path, output_prefix)
     else:
-      raise Exception(" ".join(["Unknown file format:", INPUT_EXTENSION]))
-  if len(sys.argv) == 4:
-    INPUT_PATH_1 = sys.argv[1]
-    INPUT_PATH_2 = sys.argv[2]
-    FASTQ_PREFIX = sys.argv[3]
+      raise Exception(" ".join(["Unknown file format:", input_extension]))
+  elif len(input_files) == 2:
+    input_path_1 = input_files[0]
+    input_path_2 = input_files[1]
     print("Converting following files to split and compressed FASTQ format:")
-    print("".join(["\t", INPUT_PATH_1]))
-    print("".join(["\t", INPUT_PATH_2]))
+    print("".join(["\t", input_path_1]))
+    print("".join(["\t", input_path_2]))
     print("FASTQ files will be split into files with the following structure:")
-    print('\t{}_XXXXX_RX.fastq.gz'.format(FASTQ_PREFIX))
-    split_paired_fastq(INPUT_PATH_1, INPUT_PATH_2, FASTQ_PREFIX)
+    print('\t{}_XXXXX_RX.fastq.gz'.format(output_prefix))
+    split_paired_fastq(input_path_1, input_path_2, output_prefix)
+  else:
+    raise Exception('Incorrect number of input files given: {}'.\
+      format(str(len(input_files))))
   print("Done")
+
+if __name__ == "__main__":
+  if len(sys.argv) != 3:
+    help_message()
+  fastq_prep(sys.argv[1], sys.argv[2].split(","))
