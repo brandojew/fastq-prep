@@ -131,7 +131,7 @@ def reverse_complement(seq):
   """Returns reverse complement of given sequence using list comprehension"""
   return "".join([COMPLEMENT[base] for base in seq[::-1]])
 
-def bam_to_fastq(bam_path, fastq_prefix):
+def split_bam(bam_path, fastq_prefix):
   """Converts BAM or SAM file into split FASTQ files
 
   Args:
@@ -292,7 +292,7 @@ def fastq_prep(output_prefix, input_files):
     input_path = input_files[0]
     input_extension = os.path.splitext(input_path)[1].lower()
     if input_extension == ".bam" or input_extension == ".sam":
-      bam_to_fastq(input_path, output_prefix)
+      split_bam(input_path, output_prefix)
     elif input_extension == ".fastq" or input_extension == ".fq":
       split_interleaved_fastq(input_path, output_prefix)
     else:
