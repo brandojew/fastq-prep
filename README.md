@@ -6,8 +6,10 @@ Prepares sequencing data for parallelized variant calling. Takes BAM or FASTQ fi
 Currently working on allowing many types of input (BAM, paired and interleaved FASTQ, compressed files, etc) and the option for producing paired end or interleaved chunks. Also, filtering of reads (secondary, qc-fail, etc) is not included. 
 
 Usage:
-  * python fastq_prep.py [input.bam or input.fq] [output.prefix]
-  * OR python fastq_prep.py [input_R1.fq] [input_R2.fq] [output.prefix]
+  * python fastq_prep.py [output.prefix] [input.bam or input.fq]
+ OR python fastq_prep.py [output.prefix] [input_R1.fq,input_R2.fq]
+
+  * Multiple input files are separated by commas, no spaces
 
 Requires:
   * pysam-0.7.5 (Really old version, working on compatibility with current verisons)
