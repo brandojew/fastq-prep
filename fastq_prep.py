@@ -1,8 +1,9 @@
 """Converts BAM or FASTQ files to split and compressed FASTQ files"""
 
-import pysam
 import gzip
 import sys
+import os
+import pysam
 
 #Global constants for development
 RECORDS_PER_FILE = 750000 # ~60MB
@@ -67,19 +68,21 @@ class RecordWriter(object):
     else:
       record_1 = record_b
       record_2 = record_a
+    qname_1 = '@{}/1'.format(record_1.qname)
+    qname_2 = '@{}/2'.format(record_2.qname)
     if record_1.is_reverse:
-      self.fastq_file_1.write("\n".join([record_1.qname+"/1", \
+      self.fastq_file_1.write("\n".join([qname_1, \
         reverse_complement(record_1.seq), "+", \
-        record_1.qual])+"\n")
+        record_1.qual, ""]))
     else:
-      self.fastq_file_1.write("\n".join([record_1.qname+"/1", \
+      self.fastq_file_1.write("\n".join([qname_1, \
         record_1.seq, "+", record_1.qual, ""]))
     if record_2.is_reverse:
-      self.fastq_file_2.write("\n".join([record_2.qname+"/2", \
+      self.fastq_file_2.write("\n".join([qname_2, \
         reverse_complement(record_2.seq), "+", \
         record_2.qual, ""]))
     else:
-      self.fastq_file_2.write("\n".join([record_2.qname+"/2", \
+      self.fastq_file_2.write("\n".join([qname_2, \
         record_2.seq, "+", record_2.qual, ""]))
     self.fastq_records += 1
     if self.fastq_records == RECORDS_PER_FILE:
@@ -87,12 +90,13 @@ class RecordWriter(object):
 
   def write_unpaired_record(self, record):
     """Writes given record to unpaired FASTQ file and formats appropriately"""
+    qname = '@{}'.format(record.qname)
     if record.is_reverse:
       self.unpaired_file.write("\n".join(\
-        [record.qname, reverse_complement(record.seq), "+", record.qual, ""]))
+        [qname, reverse_complement(record.seq), "+", record.qual, ""]))
     else:
       self.unpaired_file.write\
-        ("\n".join([record.qname, record.seq, "+", record.qual, ""]))
+        ("\n".join([qname, record.seq, "+", record.qual, ""]))
 
 class SimpleRecord(object):
   """Object that stores the record entries needed for a FASTQ record
@@ -128,13 +132,16 @@ def reverse_complement(seq):
   return "".join([COMPLEMENT[base] for base in seq[::-1]])
 
 def bam_to_fastq(bam_path, fastq_prefix):
-  """Converts BAM file into split FASTQ files
+  """Converts BAM or SAM file into split FASTQ files
 
   Args:
-    bam_path: Full path to BAM file to convert.
+    bam_path: Full path to BAM or SAM file to convert.
     fastq_prefix: Full path prefix for FASTQ files to generate.
   """
-  bam_file = pysam.Samfile(bam_path, "rb")
+  try:
+    bam_file = pysam.Samfile(bam_path, "rb")
+  except ValueError:
+    bam_file = pysam.Samfile(bam_path, "r")
   record_writer = RecordWriter(fastq_prefix)
   record_count = 0
   record_dict = {}
@@ -197,9 +204,11 @@ def split_interleaved_fastq(fastq_path, fastq_prefix):
     input_fastq = open(fastq_path, 'r')
   input_fastq.seek(0)
   record_writer = RecordWriter(fastq_prefix)
+  record_count = 0
   while True:
     record_1 = read_fastq_record(input_fastq)
     record_2 = read_fastq_record(input_fastq)
+    record_count += 1
     #EOF will return None for a record
     if not record_1:
       if record_2:
@@ -211,6 +220,8 @@ def split_interleaved_fastq(fastq_path, fastq_prefix):
     if record_1.qname != record_2.qname:
       raise Exception("Input FASTQ not sorted. Paired records not adjacent")
     record_writer.write_paired_records(record_1, record_2)
+    if not record_count % 10000000:
+      print('Processed {} records'.format(str(record_count)))
 
 def split_paired_fastq(fastq_1_path, fastq_2_path, fastq_prefix):
   """Converts a pair of FASTQ files to split chunks
@@ -231,9 +242,11 @@ def split_paired_fastq(fastq_1_path, fastq_2_path, fastq_prefix):
   input_fastq_1.seek(0)
   input_fastq_2.seek(0)
   record_writer = RecordWriter(fastq_prefix)
+  record_count = 0
   while True:
     record_1 = read_fastq_record(input_fastq_1)
     record_2 = read_fastq_record(input_fastq_2)
+    record_count += 1
     #EOF will return None for a record
     if not record_1:
       if record_2:
@@ -246,16 +259,38 @@ def split_paired_fastq(fastq_1_path, fastq_2_path, fastq_prefix):
     if record_1.qname != record_2.qname:
       raise Exception("Input FASTQ not sorted. Paired records not adjacent")
     record_writer.write_paired_records(record_1, record_2)
+    if not record_count % 10000000:
+      print('Processed {} records'.format(str(record_count)))
 
 if __name__ == "__main__":
-  if len(sys.argv) != 3:
-    print("Usage: python bam_to_fastq.py [in.bam] [out.fastq prefix]")
+  if len(sys.argv) < 3 or len(sys.argv) > 4:
+    print("\nUsage: python bam_to_fastq.py [in.bam, in.fq] [out.fq prefix]")
+    print("    OR python fastq_prep.py [in_1.fq] [in_2.fq] [out.fq prefix]")
+    print("\nExample: python fastq_prep.py test_input.bam test_ouput")
+    print("This command will generate test_output_XXXXX_R[1,2].fastq.gz\n")
     sys.exit()
-  BAM_PATH = sys.argv[1]
-  FASTQ_PREFIX = sys.argv[2]
-  print('Converting following BAM to FASTQ format:')
-  print(BAM_PATH)
-  print('FASTQ files will be split into files with the following structure:')
-  print('{}_XXXXX_RX.fastq.gz'.format(FASTQ_PREFIX))
-  bam_to_fastq(BAM_PATH, FASTQ_PREFIX)
+  if len(sys.argv) == 3:
+    INPUT_PATH = sys.argv[1]
+    FASTQ_PREFIX = sys.argv[2]
+    print("Converting following file to split and compressed FASTQ format:")
+    print("".join(["\t", INPUT_PATH]))
+    print("FASTQ files will be split into files with the following structure:")
+    print('\t{}_XXXXX_RX.fastq.gz'.format(FASTQ_PREFIX))
+    INPUT_EXTENSION = os.path.splitext(INPUT_PATH)[1].lower()
+    if INPUT_EXTENSION == ".bam" or INPUT_EXTENSION == ".sam":
+      bam_to_fastq(INPUT_PATH, FASTQ_PREFIX)
+    elif INPUT_EXTENSION == ".fastq" or INPUT_EXTENSION == ".fq":
+      split_interleaved_fastq(INPUT_PATH, FASTQ_PREFIX)
+    else:
+      raise Exception(" ".join(["Unknown file format:", INPUT_EXTENSION]))
+  if len(sys.argv) == 4:
+    INPUT_PATH_1 = sys.argv[1]
+    INPUT_PATH_2 = sys.argv[2]
+    FASTQ_PREFIX = sys.argv[3]
+    print("Converting following files to split and compressed FASTQ format:")
+    print("".join(["\t", INPUT_PATH_1]))
+    print("".join(["\t", INPUT_PATH_2]))
+    print("FASTQ files will be split into files with the following structure:")
+    print('\t{}_XXXXX_RX.fastq.gz'.format(FASTQ_PREFIX))
+    split_paired_fastq(INPUT_PATH_1, INPUT_PATH_2, FASTQ_PREFIX)
   print("Done")
