@@ -7,7 +7,7 @@ import pysam
 
 #Global constants for development
 RECORDS_PER_FILE = 750000 # ~60MB
-COMPRESS_LEVEL = 5
+COMPRESS_LVL = 5
 COMPLEMENT = {'A': 'T', 'C': 'G', 'G': 'C', 'T': 'A', 'N': 'N'}
 
 class RecordWriter(object):
@@ -35,7 +35,8 @@ class RecordWriter(object):
     self.fastq_file_2 = None
     self.update_fastq_index()
     unpaired_path = ''.join([fastq_prefix, '_unpaired.fastq.gz'])
-    self.unpaired_file = gzip.open(unpaired_path, 'wt', compresslevel=COMPRESS_LEVEL)
+    self.unpaired_file = gzip.open(unpaired_path, 'wt',
+                                   compresslevel=COMPRESS_LVL)
 
   def update_fastq_index(self):
     """Closes current chunks for FASTQ files and creates next chunks"""
@@ -45,12 +46,10 @@ class RecordWriter(object):
     self.fastq_index += 1
     self.fastq_records = 0
     index_str = str(self.fastq_index).zfill(5)
-    fastq_path_1 = \
-      '{}_{}_{}.fastq.gz'.format(self.fastq_prefix, index_str, "R1")
-    fastq_path_2 = \
-      '{}_{}_{}.fastq.gz'.format(self.fastq_prefix, index_str, "R2")
-    self.fastq_file_1 = gzip.open(fastq_path_1, 'wt', compresslevel=COMPRESS_LEVEL)
-    self.fastq_file_2 = gzip.open(fastq_path_2, 'wt', compresslevel=COMPRESS_LEVEL)
+    fq_path_1 = '{}_{}_{}.fastq.gz'.format(self.fastq_prefix, index_str, "R1")
+    fq_path_2 = '{}_{}_{}.fastq.gz'.format(self.fastq_prefix, index_str, "R2")
+    self.fastq_file_1 = gzip.open(fq_path_1, 'wt', compresslevel=COMPRESS_LVL)
+    self.fastq_file_2 = gzip.open(fq_path_2, 'wt', compresslevel=COMPRESS_LVL)
 
   def write_paired_records(self, record_a, record_b):
     """Writes given records to appropriate FASTQ chunk
@@ -71,19 +70,21 @@ class RecordWriter(object):
     qname_1 = '@{}/1'.format(record_1.qname)
     qname_2 = '@{}/2'.format(record_2.qname)
     if record_1.is_reverse:
-      self.fastq_file_1.write("\n".join([qname_1, \
-        reverse_complement(record_1.seq), "+", \
-        record_1.qual, ""]))
+      self.fastq_file_1.write("\n".join([qname_1,
+                                         reverse_complement(record_1.seq),
+                                         "+", record_1.qual, ""]))
     else:
-      self.fastq_file_1.write("\n".join([qname_1, \
-        record_1.seq, "+", record_1.qual, ""]))
+      self.fastq_file_1.write("\n".join([qname_1,
+                                         record_1.seq, "+",
+                                         record_1.qual, ""]))
     if record_2.is_reverse:
-      self.fastq_file_2.write("\n".join([qname_2, \
-        reverse_complement(record_2.seq), "+", \
-        record_2.qual, ""]))
+      self.fastq_file_2.write("\n".join([qname_2,
+                                         reverse_complement(record_2.seq),
+                                         "+", record_2.qual, ""]))
     else:
-      self.fastq_file_2.write("\n".join([qname_2, \
-        record_2.seq, "+", record_2.qual, ""]))
+      self.fastq_file_2.write("\n".join([qname_2,
+                                         record_2.seq, "+",
+                                         record_2.qual, ""]))
     self.fastq_records += 1
     if self.fastq_records == RECORDS_PER_FILE:
       self.update_fastq_index()
@@ -92,11 +93,11 @@ class RecordWriter(object):
     """Writes given record to unpaired FASTQ file and formats appropriately"""
     qname = '@{}'.format(record.qname)
     if record.is_reverse:
-      self.unpaired_file.write("\n".join(\
+      self.unpaired_file.write("\n".join(
         [qname, reverse_complement(record.seq), "+", record.qual, ""]))
     else:
-      self.unpaired_file.write\
-        ("\n".join([qname, record.seq, "+", record.qual, ""]))
+      self.unpaired_file.write("\n".join(
+        [qname, record.seq, "+", record.qual, ""]))
 
 class SimpleRecord(object):
   """Object that stores the record entries needed for a FASTQ record
@@ -124,11 +125,10 @@ class SimpleRecord(object):
 
   def fastq_format(self):
     """Prints data members in FASTQ format"""
-    print("\n".join([self.qname, \
-        self.seq, "+", self.qual, ""]))
+    print("\n".join([self.qname, self.seq, "+", self.qual, ""]))
 
 def reverse_complement(seq):
-  """Returns reverse complement of given sequence using list comprehension"""
+  """Returns reverse complement of given sequence"""
   return "".join([COMPLEMENT[base] for base in seq[::-1]])
 
 def split_bam(bam_path, fastq_prefix):
@@ -149,8 +149,8 @@ def split_bam(bam_path, fastq_prefix):
     record_count += 1
     if record.is_paired:
       if record.qname in record_dict:
-        record_writer.write_paired_records\
-          (record, record_dict.pop(record.qname))
+        record_writer.write_paired_records(
+          record, record_dict.pop(record.qname))
       else:
         record_dict[record.qname] = record
     else:
@@ -187,8 +187,8 @@ def read_fastq_record(fastq_file):
   if fastq_file.readline()[0] != "+":
     raise Exception("Invalid FASTQ entry")
   qual = fastq_file.readline().strip()
-  if qname[len(qname)-2:len(qname)] == '/1' \
-      or qname[len(qname)-2:len(qname)] == '/2':
+  if (qname[len(qname)-2:len(qname)] == '/1'
+      or qname[len(qname)-2:len(qname)] == '/2'):
     qname = qname[0:len(qname)-2]
   return SimpleRecord(qname, seq, qual, is_read1)
 
