@@ -10,6 +10,11 @@ RECORDS_PER_FILE = 750000 # ~60MB
 COMPRESS_LVL = 5
 COMPLEMENT = {'A': 'T', 'C': 'G', 'G': 'C', 'T': 'A', 'N': 'N'}
 
+# SAM flag values
+IS_PAIRED = 1
+IS_REVERSE = 16
+IS_READ1 = 64
+
 class RecordWriter(object):
   """Interface for writing records to split paired-end FASTQ files
 
@@ -107,21 +112,31 @@ class SimpleRecord(object):
     seq: Sequence string
     qual: Quality string
   """
-  def __init__(self, qname, seq, qual, is_read1):
+  def __init__(self, qname=None, seq=None, qual=None, is_read1=None):
     """Inits object with FASTQ entries"""
     self.qname = qname
     self.seq = seq
     self.qual = qual
     self.is_read1 = is_read1
     self.is_reverse = False
+    self.is_paired = False
 
-  def copy_constructor(self, record):
-    """Inits object using Pysam record object"""
-    self.qname = record.qname
-    self.seq = record.seq
-    self.qual = record.qual
-    self.is_read1 = record.is_read1
-    self.is_reverse = record.is_reverse
+  def sam_constructor(self, record):
+    """Inits object using SAM record string"""
+    entries = record.strip().split()
+    if len(entries) < 11:
+      raise Exception("ERROR: Input stream format not recognized")
+    try:
+      sam_flag = int(entries[1])
+    except:
+      raise Exception("ERROR: Input stream format not recognized")
+    self.qname = entries[0]
+    self.seq = entries[9]
+    self.qual = entries[10]
+    self.is_read1 = bool(IS_READ1 & sam_flag)
+    self.is_reverse = bool(IS_REVERSE & sam_flag)
+    self.is_paired = bool(IS_PAIRED & sam_flag)
+    return self
 
   def fastq_format(self):
     """Prints data members in FASTQ format"""
@@ -144,7 +159,7 @@ def read_fastq_record(fastq_file):
   if not qname:
     return
   if qname[0] != "@":
-    raise Exception("Invalid FASTQ entry")
+    raise Exception("ERROR: Invalid FASTQ entry")
   else:
     qname = qname[1::]
   if qname[-1] == "1":
@@ -155,12 +170,38 @@ def read_fastq_record(fastq_file):
     is_read1 = None
   seq = fastq_file.readline().strip()
   if fastq_file.readline()[0] != "+":
-    raise Exception("Invalid FASTQ entry")
+    raise Exception("ERROR: Invalid FASTQ entry")
   qual = fastq_file.readline().strip()
   if (qname[len(qname)-2:len(qname)] == '/1'
       or qname[len(qname)-2:len(qname)] == '/2'):
     qname = qname[0:len(qname)-2]
   return SimpleRecord(qname, seq, qual, is_read1)
+
+def split_sam_stream(fastq_prefix):
+  """Reads SAM records from stdin and converts to split and compressed FASTQ
+
+  Args:
+    fastq_prefix: Path prefix for output files
+  """
+  record_writer = RecordWriter(fastq_prefix)
+  record_count = 0
+  record_dict = {}
+  for line in sys.stdin:
+    record = SimpleRecord().sam_constructor(line)
+    record_count += 1
+    if record.is_paired:
+      if record.qname in record_dict:
+        record_writer.write_paired_records(
+          record, record_dict.pop(record.qname))
+      else:
+        record_dict[record.qname] = record
+    else:
+      record_writer.write_unpaired_record(record)
+    if not record_count % 10000000:
+      print('Processed {} records'.format(str(record_count)))
+  for record in record_dict.values():
+    record_writer.write_unpaired_record(record)
+
 
 def split_alignment_file(input_path, fastq_prefix):
   """Converts BAM, SAM, or CRAM file into split FASTQ files
@@ -222,7 +263,7 @@ def split_interleaved_fastq(fastq_path, fastq_prefix):
       record_writer.write_unpaired_record(record_1)
       break
     if record_1.qname != record_2.qname:
-      raise Exception("Input FASTQ not sorted. Paired records not adjacent")
+      raise Exception("ERROR: FASTQ not sorted. Paired records not adjacent")
     record_writer.write_paired_records(record_1, record_2)
     if not record_count % 10000000:
       print('Processed {} records'.format(str(record_count)))
@@ -261,7 +302,7 @@ def split_paired_fastq(fastq_1_path, fastq_2_path, fastq_prefix):
       record_writer.write_unpaired_record(record_1)
       continue
     if record_1.qname != record_2.qname:
-      raise Exception("Input FASTQ not sorted. Paired records not adjacent")
+      raise Exception("ERROR: FASTQ not sorted. Paired records not adjacent")
     record_writer.write_paired_records(record_1, record_2)
     if not record_count % 10000000:
       print('Processed {} records'.format(str(record_count)))
@@ -285,32 +326,40 @@ def fastq_prep(output_prefix, input_files):
     output_prefix: full path prefix for output FASTQ chunks
     input_files: A list of input files to convert (1 or 2 files only)
   """
-  print("\nConverting following file(s) to split and compressed FASTQ format:")
-  for input_path in input_files:
-    print("".join(["\t", input_path]))
-  print("Output will be split into files with the following path structure:")
-  print('\t{}_XXXXX_RX.fastq.gz'.format(output_prefix))
-  if len(input_files) == 1:
-    input_path = input_files[0]
-    input_extension = os.path.splitext(input_path)[1].lower()
-    if (input_extension == ".bam" or
-        input_extension == ".sam" or
-        input_extension == ".cram"):
-      split_alignment_file(input_path, output_prefix)
-    elif input_extension == ".fastq" or input_extension == ".fq":
-      split_interleaved_fastq(input_path, output_prefix)
-    else:
-      raise Exception(" ".join(["Unknown file format:", input_extension]))
-  elif len(input_files) == 2:
-    input_path_1 = input_files[0]
-    input_path_2 = input_files[1]
-    split_paired_fastq(input_path_1, input_path_2, output_prefix)
+  if not len(input_files):
+    print("\nConverting input SAM stream to split and compressed FASTQ files")
+    split_sam_stream(output_prefix)
   else:
-    raise Exception('Incorrect number of input files given: {}'.\
-      format(str(len(input_files))))
+    print("\nConverting following files to split and compressed FASTQ files:")
+    for input_path in input_files:
+      print("".join(["\t", input_path]))
+    print("Output will be split into files with the following path structure:")
+    print('\t{}_XXXXX_RX.fastq.gz'.format(output_prefix))
+    if len(input_files) == 1:
+      input_path = input_files[0]
+      input_extension = os.path.splitext(input_path)[1].lower()
+      if (input_extension == ".bam" or
+          input_extension == ".sam" or
+          input_extension == ".cram"):
+        split_alignment_file(input_path, output_prefix)
+      elif input_extension == ".fastq" or input_extension == ".fq":
+        split_interleaved_fastq(input_path, output_prefix)
+      else:
+        raise Exception(" ".join(["ERROR: Unknown file format:",
+                                  input_extension]))
+    elif len(input_files) == 2:
+      input_path_1 = input_files[0]
+      input_path_2 = input_files[1]
+      split_paired_fastq(input_path_1, input_path_2, output_prefix)
+    else:
+      raise Exception('ERROR: Incorrect number of input files given: {}'.\
+        format(str(len(input_files))))
   print("Done")
 
 if __name__ == "__main__":
-  if len(sys.argv) != 3:
+  if len(sys.argv) == 3:
+    fastq_prep(sys.argv[1], sys.argv[2].split(","))
+  elif len(sys.argv) == 2:
+    fastq_prep(sys.argv[1], [])
+  else:
     help_message()
-  fastq_prep(sys.argv[1], sys.argv[2].split(","))
