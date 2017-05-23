@@ -131,36 +131,6 @@ def reverse_complement(seq):
   """Returns reverse complement of given sequence"""
   return "".join([COMPLEMENT[base] for base in seq[::-1]])
 
-def split_bam(bam_path, fastq_prefix):
-  """Converts BAM or SAM file into split FASTQ files
-
-  Args:
-    bam_path: Full path to BAM or SAM file to convert.
-    fastq_prefix: Full path prefix for FASTQ files to generate.
-  """
-  try:
-    bam_file = pysam.Samfile(bam_path, "rb")
-  except ValueError:
-    bam_file = pysam.Samfile(bam_path, "r")
-  record_writer = RecordWriter(fastq_prefix)
-  record_count = 0
-  record_dict = {}
-  for record in bam_file:
-    record_count += 1
-    if record.is_paired:
-      if record.qname in record_dict:
-        record_writer.write_paired_records(
-          record, record_dict.pop(record.qname))
-      else:
-        record_dict[record.qname] = record
-    else:
-      record_writer.write_unpaired_record(record)
-    if not record_count % 10000000:
-      print('Processed {} records'.format(str(record_count)))
-
-  for record in record_dict.values():
-    record_writer.write_unpaired_record(record)
-
 def read_fastq_record(fastq_file):
   """Reads one record from a FASTQ file
 
@@ -191,6 +161,38 @@ def read_fastq_record(fastq_file):
       or qname[len(qname)-2:len(qname)] == '/2'):
     qname = qname[0:len(qname)-2]
   return SimpleRecord(qname, seq, qual, is_read1)
+
+def split_alignment_file(input_path, fastq_prefix):
+  """Converts BAM, SAM, or CRAM file into split FASTQ files
+
+  Args:
+    bam_path: Full path to BAM, SAM, or CRAM file to convert.
+    fastq_prefix: Full path prefix for FASTQ files to generate.
+  """
+  input_extension = os.path.splitext(input_path)[1].lower()
+  if input_extension == ".bam":
+    alignment_file = pysam.Samfile(input_path, "rb")
+  elif input_extension == ".sam":
+    alignment_file = pysam.Samfile(input_path, "r")
+  elif input_extension == ".cram":
+    alignment_file = pysam.Samfile(input_path, "rc")
+  record_writer = RecordWriter(fastq_prefix)
+  record_count = 0
+  record_dict = {}
+  for record in alignment_file:
+    record_count += 1
+    if record.is_paired:
+      if record.qname in record_dict:
+        record_writer.write_paired_records(
+          record, record_dict.pop(record.qname))
+      else:
+        record_dict[record.qname] = record
+    else:
+      record_writer.write_unpaired_record(record)
+    if not record_count % 10000000:
+      print('Processed {} records'.format(str(record_count)))
+  for record in record_dict.values():
+    record_writer.write_unpaired_record(record)
 
 def split_interleaved_fastq(fastq_path, fastq_prefix):
   """Converts a single interleaved FASTQ file to split and paired chunks
@@ -276,7 +278,7 @@ def help_message():
 def fastq_prep(output_prefix, input_files):
   """Main interface for converting files to split and compressed fastq files
 
-  Determines type of input (Single BAM, Single FASTQ, or Paired FASTQ) and
+  Determines type of input (Single BAM, SAM, CRAM, FASTQ, or Paired FASTQ) and
   passes input files to correct conversion function.
 
   Args:
@@ -291,8 +293,10 @@ def fastq_prep(output_prefix, input_files):
   if len(input_files) == 1:
     input_path = input_files[0]
     input_extension = os.path.splitext(input_path)[1].lower()
-    if input_extension == ".bam" or input_extension == ".sam":
-      split_bam(input_path, output_prefix)
+    if (input_extension == ".bam" or
+        input_extension == ".sam" or
+        input_extension == ".cram"):
+      split_alignment_file(input_path, output_prefix)
     elif input_extension == ".fastq" or input_extension == ".fq":
       split_interleaved_fastq(input_path, output_prefix)
     else:
