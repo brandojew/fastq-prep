@@ -10,10 +10,17 @@ RECORDS_PER_FILE = 750000 # ~60MB
 COMPRESS_LVL = 5
 COMPLEMENT = {'A': 'T', 'C': 'G', 'G': 'C', 'T': 'A', 'N': 'N'}
 
+# Filter options
+FILTER_QC = True
+FILTER_NON_PRIMARY = True
+
 # SAM flag values
 IS_PAIRED = 1
 IS_REVERSE = 16
 IS_READ1 = 64
+IS_READ2 = 128
+IS_NOT_PRIMARY_ALIGNMENT = 256
+IS_QC_FAIL = 512
 
 class RecordWriter(object):
   """Interface for writing records to split paired-end FASTQ files
@@ -66,12 +73,15 @@ class RecordWriter(object):
       record_a, record_b: Paired records (pysam.Samfile.fetch() item)
       in no particular order
     """
-    if record_a.is_read1:
+    if record_a.is_read1 and record_b.is_read2:
       record_1 = record_a
       record_2 = record_b
-    else:
+    elif record_a.is_read2 and record_b.is_read1:
       record_1 = record_b
       record_2 = record_a
+    else:
+      print("Not proper pair")
+      return
     qname_1 = '@{}/1'.format(record_1.qname)
     qname_2 = '@{}/2'.format(record_2.qname)
     if record_1.is_reverse:
@@ -112,14 +122,18 @@ class SimpleRecord(object):
     seq: Sequence string
     qual: Quality string
   """
-  def __init__(self, qname=None, seq=None, qual=None, is_read1=None):
+  def __init__(self, qname=None, seq=None, qual=None,
+               is_read1=False, is_read2=False):
     """Inits object with FASTQ entries"""
     self.qname = qname
     self.seq = seq
     self.qual = qual
     self.is_read1 = is_read1
+    self.is_read2 = is_read2
+    self.is_paired = is_read1 or is_read2
     self.is_reverse = False
-    self.is_paired = False
+    self.is_qcfail = False
+    self.is_secondary = False
 
   def sam_constructor(self, record):
     """Inits object using SAM record string"""
@@ -134,6 +148,9 @@ class SimpleRecord(object):
     self.seq = entries[9]
     self.qual = entries[10]
     self.is_read1 = bool(IS_READ1 & sam_flag)
+    self.is_read2 = bool(IS_READ2 & sam_flag)
+    self.is_qcfail = bool(IS_QC_FAIL & sam_flag)
+    self.is_secondary = bool(IS_NOT_PRIMARY_ALIGNMENT & sam_flag)
     self.is_reverse = bool(IS_REVERSE & sam_flag)
     self.is_paired = bool(IS_PAIRED & sam_flag)
     return self
@@ -164,10 +181,13 @@ def read_fastq_record(fastq_file):
     qname = qname[1::]
   if qname[-1] == "1":
     is_read1 = True
+    is_read2 = False
   elif qname[-1] == "2":
     is_read1 = False
+    is_read2 = True
   else:
-    is_read1 = None
+    is_read1 = False
+    is_read2 = False
   seq = fastq_file.readline().strip()
   if fastq_file.readline()[0] != "+":
     raise Exception("ERROR: Invalid FASTQ entry")
@@ -175,7 +195,7 @@ def read_fastq_record(fastq_file):
   if (qname[len(qname)-2:len(qname)] == '/1'
       or qname[len(qname)-2:len(qname)] == '/2'):
     qname = qname[0:len(qname)-2]
-  return SimpleRecord(qname, seq, qual, is_read1)
+  return SimpleRecord(qname, seq, qual, is_read1, is_read2)
 
 def split_sam_stream(fastq_prefix):
   """Reads SAM records from stdin and converts to split and compressed FASTQ
@@ -185,14 +205,28 @@ def split_sam_stream(fastq_prefix):
   """
   record_writer = RecordWriter(fastq_prefix)
   record_count = 0
+  filter_secondary_count = 0
+  filter_qc_count = 0
+  filter_improper_pair_count = 0
   record_dict = {}
   for line in sys.stdin:
     record = SimpleRecord().sam_constructor(line)
     record_count += 1
-    if record.is_paired:
+    if FILTER_NON_PRIMARY and record.is_secondary:
+      filter_secondary_count += 1
+    elif FILTER_QC and record.is_qcfail:
+      filter_qc_count += 1
+    elif record.is_paired:
       if record.qname in record_dict:
-        record_writer.write_paired_records(
-          record, record_dict.pop(record.qname))
+        record2 = record_dict.pop(record.qname)
+        if not ((record.is_read1 and record2.is_read2) or
+                (record.is_read2 and record2.is_read1)):
+          filter_improper_pair_count += 1
+          print("Improper pair detected: {}".format(record.qname))
+          print("Discarding one of these reads")
+          record_dict[record.qname] = record
+        else:
+          record_writer.write_paired_records(record, record2)
       else:
         record_dict[record.qname] = record
     else:
@@ -201,7 +235,11 @@ def split_sam_stream(fastq_prefix):
       print('Processed {} records'.format(str(record_count)))
   for record in record_dict.values():
     record_writer.write_unpaired_record(record)
-
+  if FILTER_QC:
+    print("Filtered {} records failed QC check".format(str(filter_qc_count)))
+  if FILTER_NON_PRIMARY:
+    print("Filtered {} records that were secondary".format(str(filter_secondary_count)))
+  print("Filtered {} records that were improperly paired".format(str(filter_improper_pair_count)))
 
 def split_alignment_file(input_path, fastq_prefix):
   """Converts BAM, SAM, or CRAM file into split FASTQ files
@@ -219,13 +257,27 @@ def split_alignment_file(input_path, fastq_prefix):
     alignment_file = pysam.Samfile(input_path, "rc")
   record_writer = RecordWriter(fastq_prefix)
   record_count = 0
+  filter_qc_count = 0
+  filter_secondary_count = 0
+  filter_improper_pair_count = 0
   record_dict = {}
   for record in alignment_file:
     record_count += 1
-    if record.is_paired:
+    if FILTER_NON_PRIMARY and record.is_secondary:
+      filter_secondary_count += 1
+    elif FILTER_QC and record.is_qcfail:
+      filter_qc_count += 1
+    elif record.is_paired:
       if record.qname in record_dict:
-        record_writer.write_paired_records(
-          record, record_dict.pop(record.qname))
+        record2 = record_dict.pop(record.qname)
+        if not ((record.is_read1 and record2.is_read2) or
+                (record.is_read2 and record2.is_read1)):
+          filter_improper_pair_count += 1
+          print("Improper pair detected: {}".format(record.qname))
+          print("Discarding one of these reads")
+          record_dict[record.qname] = record
+        else:
+          record_writer.write_paired_records(record, record2)
       else:
         record_dict[record.qname] = record
     else:
@@ -234,6 +286,11 @@ def split_alignment_file(input_path, fastq_prefix):
       print('Processed {} records'.format(str(record_count)))
   for record in record_dict.values():
     record_writer.write_unpaired_record(record)
+  if FILTER_QC:
+    print("Filtered {} records failed QC check".format(str(filter_qc_count)))
+  if FILTER_NON_PRIMARY:
+    print("Filtered {} records that were secondary".format(str(filter_secondary_count)))
+  print("Filtered {} records that were improperly paired".format(str(filter_improper_pair_count)))
 
 def split_interleaved_fastq(fastq_path, fastq_prefix):
   """Converts a single interleaved FASTQ file to split and paired chunks
@@ -263,7 +320,7 @@ def split_interleaved_fastq(fastq_path, fastq_prefix):
       record_writer.write_unpaired_record(record_1)
       break
     if record_1.qname != record_2.qname:
-      raise Exception("ERROR: FASTQ not sorted. Paired records not adjacent")
+      raise Exception("ERROR: Input FASTQ not sorted. Paired records not adjacent")
     record_writer.write_paired_records(record_1, record_2)
     if not record_count % 10000000:
       print('Processed {} records'.format(str(record_count)))
@@ -302,7 +359,7 @@ def split_paired_fastq(fastq_1_path, fastq_2_path, fastq_prefix):
       record_writer.write_unpaired_record(record_1)
       continue
     if record_1.qname != record_2.qname:
-      raise Exception("ERROR: FASTQ not sorted. Paired records not adjacent")
+      raise Exception("ERROR: Input FASTQ not sorted. Paired records not adjacent")
     record_writer.write_paired_records(record_1, record_2)
     if not record_count % 10000000:
       print('Processed {} records'.format(str(record_count)))
@@ -327,10 +384,10 @@ def fastq_prep(output_prefix, input_files):
     input_files: A list of input files to convert (1 or 2 files only)
   """
   if not len(input_files):
-    print("\nConverting input SAM stream to split and compressed FASTQ files")
+    print("\nConverting input SAM stream to split and compressed FASTQ format")
     split_sam_stream(output_prefix)
   else:
-    print("\nConverting following files to split and compressed FASTQ files:")
+    print("\nConverting following file(s) to split and compressed FASTQ format:")
     for input_path in input_files:
       print("".join(["\t", input_path]))
     print("Output will be split into files with the following path structure:")
