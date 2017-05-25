@@ -409,8 +409,8 @@ def fastq_prep(output_prefix, input_files):
       input_path_2 = input_files[1]
       split_paired_fastq(input_path_1, input_path_2, output_prefix)
     else:
-      raise Exception('ERROR: Incorrect number of input files given: {}'.\
-        format(str(len(input_files))))
+      raise Exception('ERROR: Incorrect number of input files given: {}'
+                      .format(str(len(input_files))))
   print("Done")
 
 if __name__ == "__main__":
